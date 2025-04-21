@@ -1,2 +1,3 @@
 # conditional_measures
 This repository contains code which can be used to compute estimators of conditional inequality measures qZI and qDI. It also contains implementation of several methods of estimation of conditional quantile function based on quantile regression.
+The code included in this repository was used to perform a simulation study and real data analysis described in an article *Estimation of conditional inequality curves and measures via estimating the conditional quantile function* by Alicja Jokiel-Rokita, Sylwester Piątek, and Rafał Topolnicki [arXiv link](https://arxiv.org/abs/2412.20228).
