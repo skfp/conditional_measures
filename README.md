@@ -6,11 +6,11 @@ Here are the steps that need to be done to use the code:
 1. Dependencies from requirements.txt need to be installed.
 2. Directory experiments_results needs to be created in a project folder.
 
-In case of troubles with installing rpy2, the code from files with suffix "_no_r" can be used.
+In case of troubles with installing rpy2, the code from files with suffix **_no_r** can be used. The random seed is fixed in the mc_fld.py file, to allow reproducibility of the experiment.
 
 Description of the files:
-- mc_fld.py - code estimating the conditional quantile function and conditional inequality curves and measures; the code is written for the simulation study on flattened logistic distribution (FLD).
-- run_mc_fld.sh - code running the Monte Carlo simulations.
-- truevalue_fld.py - code computing the true values of the conditional inequality measures in FLD simulation study.
-- real_data_analysis.ipynb - code performing the analysis of the data from census2000 dataset.
-- MakePlot.ipynb - code used to generate boxplots and heatmaps presenting the results of the simulation study.
+- *mc_fld.py* - code estimating the conditional quantile function and conditional inequality curves and measures; the code is written for the simulation study with example data drawn from flattened logistic distribution (FLD).
+- *run_mc_fld.sh* - code running the Monte Carlo simulations.
+- *truevalue_fld.py* - code computing the true values of the conditional inequality measures in FLD simulation study.
+- *real_data_analysis.ipynb* - code performing the analysis of the data from census2000 dataset.
+- *MakePlot.ipynb* - code used to generate boxplots and heatmaps presenting the results of the simulation study.
