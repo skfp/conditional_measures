@@ -192,7 +192,7 @@ def quantile_regression_single_tau(x, y, tau, beta_init=None, direction="up"):
             constraints.append(z @ beta <= z @ beta_init)  # Ensure non-crossing (downward)
     # Solve the problem
     problem = cp.Problem(cp.Minimize(objective), constraints)
-    problem.solve()
+    problem.solve(solver=cp.ECOS)
     return beta.value
 
 def scheme_1(x, y, taus):
@@ -261,7 +261,7 @@ def estimate_betas_b10(x, y, m):
     constraints = [z @ beta[:, t] >= z @ beta[:, t-1] for t in range(1, m-1)]
     # Solve the optimization problem
     problem = cp.Problem(cp.Minimize(objective), constraints)
-    problem.solve()
+    problem.solve(solver=cp.ECOS)
     return beta.value
 
 def estimate_indices_b10(data, qs, xs):
@@ -330,6 +330,36 @@ def estimate_indices_iso_approx(data, qs, xs, tau, approx_fun=approx_f):
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
 
+def _qrr_single(p, x, y, starting_point=None):
+    """Nonlinear QR on Y = exp(y) scale: min Σ ρ_p(exp(y_i) - exp(a + b·x_i)) over (a, b)."""
+    if starting_point is None:
+        starting_point = [np.median(y), 0.0]
+    Y = np.exp(y)
+    def obj(beta):
+        a, b = beta
+        Q = np.exp(np.clip(a + b * x, -500, 500))
+        r = Y - Q
+        return np.mean(np.abs(r) + (2 * p - 1) * r)
+    result = minimize(obj, x0=starting_point, method=MINIMIZE_ALGORITHM, tol=MINIMIZE_TOL)
+    return list(result.x)
+
+
+def estimate_indices_qrr(data, qs, xs):
+    x = np.array(data["x"])
+    y = np.array(data["y"])
+    betas = [_qrr_single(qs[0], x, y)]
+    for q in qs[1:]:
+        betas.append(_qrr_single(q, x, y, starting_point=betas[-1]))
+    betas_array = np.array(betas)
+    beta0s = betas_array[:, 0]
+    beta1s = betas_array[:, 1]
+    qZ_preds = [qZ(xv, qs, qs2, beta0s, beta1s) for xv in xs]
+    qD_preds = [qD(xv, qs, qs2, beta0s, beta1s) for xv in xs]
+    qZI_pred = [simpson(qZ_pred, x=qs2_01) for qZ_pred in qZ_preds]
+    qDI_pred = [simpson(qD_pred, x=qs2_01) for qD_pred in qD_preds]
+    return {"qZI": qZI_pred, "qDI": qDI_pred}
+
+
 def estimate_beta_qrfnc_R(data, qshalf, epsilon, qs, xs, starting_q):
     # print('testing_qrfnc')
     def df_to_r(df):
@@ -390,6 +420,72 @@ def estimate_beta_qrfnc_R(data, qshalf, epsilon, qs, xs, starting_q):
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
 
+IQRR_LEVELS = np.array([0.25, 0.75])
+
+
+def _empirical_qZI_qDI(y_bin):
+    """qZI and qDI from log-Y observations via empirical quantile function."""
+    if len(y_bin) < 2:
+        return np.nan, np.nan
+    Q_log = np.array([np.quantile(y_bin, q) for q in qs])
+    Q_interp = interp1d(np.around(qs, decimals=2), Q_log,
+                        bounds_error=False, fill_value=(Q_log[0], Q_log[-1]))
+    qz = 1 - np.exp(Q_interp(qs2 / 2)) / np.exp(Q_interp(qs2 / 2 + 0.5))
+    qz = np.insert(np.insert(qz, 0, 1.0), len(qz) + 1, 1.0)
+    qd = 1 - np.exp(Q_interp(qs2 / 2)) / np.exp(Q_interp(1 - qs2 / 2))
+    qd = np.insert(np.insert(qd, 0, 1.0), len(qd) + 1, 0.0)
+    return simpson(qz, x=qs2_01), simpson(qd, x=qs2_01)
+
+
+def estimate_indices_strat(data, qs, xs, K=5):
+    x = np.array(data["x"])
+    y = np.array(data["y"])
+    xmax_bin = max(x.max(), max(xs))
+    bin_edges = np.linspace(0, xmax_bin, K + 1)
+
+    bin_qZI = np.full(K, np.nan)
+    bin_qDI = np.full(K, np.nan)
+    for k in range(K):
+        lo, hi = bin_edges[k], bin_edges[k + 1]
+        mask = (x >= lo) & (x < hi) if k < K - 1 else (x >= lo) & (x <= hi)
+        bin_qZI[k], bin_qDI[k] = _empirical_qZI_qDI(y[mask])
+
+    # fill empty bins from nearest non-empty neighbour
+    valid = np.where(~np.isnan(bin_qZI))[0]
+    if len(valid) == 0:
+        return {"qZI": [np.nan] * len(xs), "qDI": [np.nan] * len(xs)}
+    for k in np.where(np.isnan(bin_qZI))[0]:
+        nn = valid[np.argmin(np.abs(valid - k))]
+        bin_qZI[k], bin_qDI[k] = bin_qZI[nn], bin_qDI[nn]
+
+    qZI_pred, qDI_pred = [], []
+    for xv in xs:
+        k = min(int(np.searchsorted(bin_edges[1:], xv, side='left')), K - 1)
+        qZI_pred.append(float(bin_qZI[k]))
+        qDI_pred.append(float(bin_qDI[k]))
+    return {"qZI": qZI_pred, "qDI": qDI_pred}
+
+
+def estimate_indices_iqrr(data, qs, xs):
+    """BK at {0.25, 0.75} only, linearly interpolated to the full quantile grid."""
+    x = np.array(data["x"]).reshape(-1, 1)
+    y = np.array(data["y"])
+    beta0s_sparse, beta1s_sparse = [], []
+    for q in IQRR_LEVELS:
+        qr = QuantileRegressor(quantile=q, alpha=0, solver=solver).fit(x, y)
+        beta0s_sparse.append(qr.intercept_)
+        beta1s_sparse.append(qr.coef_[0])
+    beta0_fn = interp1d(IQRR_LEVELS, beta0s_sparse, kind='linear', fill_value='extrapolate')
+    beta1_fn = interp1d(IQRR_LEVELS, beta1s_sparse, kind='linear', fill_value='extrapolate')
+    beta0s = beta0_fn(qs)
+    beta1s = beta1_fn(qs)
+    qZ_preds = [qZ(xv, qs, qs2, beta0s, beta1s) for xv in xs]
+    qD_preds = [qD(xv, qs, qs2, beta0s, beta1s) for xv in xs]
+    qZI_pred = [simpson(qZ_pred, x=qs2_01) for qZ_pred in qZ_preds]
+    qDI_pred = [simpson(qD_pred, x=qs2_01) for qD_pred in qD_preds]
+    return {"qZI": qZI_pred, "qDI": qDI_pred}
+
+
 def compute_indices(alpha, beta, c, n, xmax, taus, ms):
     # generate sample from FLD distribution
     data = gen_sample(alpha, beta, c, n, xmax)
@@ -404,13 +500,16 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
     KB82_pred = estimate_indices_KB82(data, qs, xlist)
     b10_pred = estimate_indices_b10(data, qs, xlist)
     wl_pred = estimate_indices_wl(data, qs, xlist)
+    qrr_pred = estimate_indices_qrr(data, qs, xlist)
+    strat_pred = estimate_indices_strat(data, qs, xlist)
+    iqrr_pred = estimate_indices_iqrr(data, qs, xlist)
     results = [
         iso_qr_pred["qZI"],
         iso_qr_pred["qDI"]
     ]
     for iso_Af_pred in iso_Af_preds2:
         results = results + [iso_Af_pred["qZI"], iso_Af_pred["qDI"]]
-    results = results + [KB82_pred["qZI"], KB82_pred["qDI"]] 
+    results = results + [KB82_pred["qZI"], KB82_pred["qDI"]]
     results = results + [
         b10_pred["qZI"],
         b10_pred["qDI"]
@@ -419,11 +518,10 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
         wl_pred["qZI_wl1"],
         wl_pred["qDI_wl1"]
     ]
-    results = results + [
-        qrfnc_pred_R_middle["qZI"],
-        qrfnc_pred_R_middle["qDI"],
-        xlist,
-    ]
+    results = results + [qrfnc_pred_R_middle["qZI"], qrfnc_pred_R_middle["qDI"]]
+    results = results + [qrr_pred["qZI"], qrr_pred["qDI"]]
+    results = results + [strat_pred["qZI"], strat_pred["qDI"]]
+    results = results + [iqrr_pred["qZI"], iqrr_pred["qDI"], xlist]
     return results
 
 
@@ -431,7 +529,7 @@ def run(args):
     outputfilename = f"{args.output}_n={args.n}_a={args.alpha}b={args.beta}_c={args.c}_xmax={args.xmax}.csv"
     taus = args.taus_float_type
     ms=[]
-    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrfnc_R"]
+    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrfnc_R"] + ["qrr"] + ["strat_K5"] + ["iqrr"]
     ncol = 2 * len(METHODS) + 1
     column_names = []
     for method in METHODS:
