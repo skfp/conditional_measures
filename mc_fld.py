@@ -330,31 +330,24 @@ def estimate_indices_iso_approx(data, qs, xs, tau, approx_fun=approx_f):
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
 
-def _qrr_single(p, x, y, starting_point=None):
-    """Nonlinear QR on Y = exp(y) scale: min Σ ρ_p(exp(y_i) - exp(a + b·x_i)) over (a, b)."""
-    if starting_point is None:
-        starting_point = [np.median(y), 0.0]
-    Y = np.exp(y)
-    def obj(beta):
-        a, b = beta
-        Q = np.exp(np.clip(a + b * x, -500, 500))
-        r = Y - Q
-        return np.mean(np.abs(r) + (2 * p - 1) * r)
-    result = minimize(obj, x0=starting_point, method=MINIMIZE_ALGORITHM, tol=MINIMIZE_TOL)
-    return list(result.x)
-
-
 def estimate_indices_qrr(data, qs, xs):
-    x = np.array(data["x"])
+    """Weighted QR on log(Y) with w_i = exp(y_i - mean(y)), plus isotonic correction.
+    Weights downweight/upweight observations by their outcome level relative to the
+    sample mean; geometric-mean normalisation prevents extreme leverage.
+    Distinct from BK (equal weights, no isotonic) and IOQR (equal weights + isotonic).
+    """
+    x = np.array(data["x"]).reshape(-1, 1)
     y = np.array(data["y"])
-    betas = [_qrr_single(qs[0], x, y)]
-    for q in qs[1:]:
-        betas.append(_qrr_single(q, x, y, starting_point=betas[-1]))
-    betas_array = np.array(betas)
-    beta0s = betas_array[:, 0]
-    beta1s = betas_array[:, 1]
-    qZ_preds = [qZ(xv, qs, qs2, beta0s, beta1s) for xv in xs]
-    qD_preds = [qD(xv, qs, qs2, beta0s, beta1s) for xv in xs]
+    weights = np.exp(y - y.mean())
+    beta0s, beta1s = [], []
+    for q in qs:
+        qr = QuantileRegressor(quantile=q, alpha=0, solver=solver).fit(x, y, sample_weight=weights)
+        beta0s.append(qr.intercept_)
+        beta1s.append(qr.coef_[0])
+    beta0s_iso = IsotonicRegression().fit_transform(qs, beta0s)
+    beta1s_iso = IsotonicRegression().fit_transform(qs, beta1s)
+    qZ_preds = [qZ(xv, qs, qs2, beta0s_iso, beta1s_iso) for xv in xs]
+    qD_preds = [qD(xv, qs, qs2, beta0s_iso, beta1s_iso) for xv in xs]
     qZI_pred = [simpson(qZ_pred, x=qs2_01) for qZ_pred in qZ_preds]
     qDI_pred = [simpson(qD_pred, x=qs2_01) for qD_pred in qD_preds]
     return {"qZI": qZI_pred, "qDI": qDI_pred}
