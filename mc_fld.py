@@ -40,6 +40,31 @@ solver = "highs" if sp_version >= parse_version("1.6.0") else "interior-point"
 # rpy2 initialization
 quantreg = importr('quantreg')
 stats = importr('stats')
+importr('Qtools')
+
+# R helper: fit QRR at multiple tau pairs and return coefficient matrix (n_tau x 2)
+robjects.r("""
+fit_qrr_multi <- function(x_vec, y_vec, tau_lowers, tau_uppers) {
+    dd <- data.frame(x = x_vec, y = y_vec)
+    n_tau <- length(tau_lowers)
+    results <- matrix(NA_real_, nrow = n_tau, ncol = 2)
+    for (i in seq_len(n_tau)) {
+        tryCatch({
+            invisible(capture.output(
+                fit <- suppressWarnings(
+                    Qtools::qrr(y ~ x, data = dd,
+                                taus = c(tau_lowers[i], tau_uppers[i]))
+                )
+            ))
+            results[i, ] <- coef(fit)
+        }, error = function(e) NULL)
+    }
+    results
+}
+""")
+
+# Tau grid for QRR: 11 levels covering (0, 0.5); each defines one ratio pair per curve
+QRR_TAU_GRID = np.array([0.01, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.49])
 
 def gen_sample(alpha, beta, c, n, xmax):
     x = np.random.uniform(0, xmax, n)
@@ -353,6 +378,56 @@ def estimate_indices_qrr_linear(data, qs, xs):
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
 
+def estimate_indices_qrr(data, qs, xs):
+    """Farcomeni-Geraci (2024) Quantile Ratio Regression via Qtools::qrr().
+
+    Fits QRR at QRR_TAU_GRID tau pairs for both the qD pairing (tau, 1-tau)
+    and the qZ pairing (tau, tau+0.5).  Link: g(R) = log(R-1), so
+    R = 1 + exp(eta) and qD/qZ = sigmoid(eta) where eta = alpha + beta*x.
+    Data must be on log-Y scale (as stored in the simulation); we exp() it
+    before passing to R so that qrr works on the original Y scale.
+    """
+    def np_to_r(arr):
+        with (robjects.default_converter + numpy2ri.converter).context():
+            return robjects.conversion.get_conversion().py2rpy(arr)
+
+    x_vec = np.array(data["x"], dtype=float)
+    Y_vec = np.exp(np.array(data["y"], dtype=float))  # Y, not log(Y)
+
+    r_fit = robjects.r['fit_qrr_multi']
+    coefs_D = np.array(r_fit(
+        np_to_r(x_vec), np_to_r(Y_vec),
+        np_to_r(QRR_TAU_GRID), np_to_r(1.0 - QRR_TAU_GRID)
+    ))  # shape (11, 2): alpha and beta for each (tau, 1-tau) pair
+    coefs_Z = np.array(r_fit(
+        np_to_r(x_vec), np_to_r(Y_vec),
+        np_to_r(QRR_TAU_GRID), np_to_r(QRR_TAU_GRID + 0.5)
+    ))  # shape (11, 2): alpha and beta for each (tau, tau+0.5) pair
+
+    tau_fine = qs2 / 2  # 97 values in [0.01, 0.49], matching qs2 inner grid
+    ok_D = np.isfinite(coefs_D[:, 0]) & np.isfinite(coefs_D[:, 1])
+    ok_Z = np.isfinite(coefs_Z[:, 0]) & np.isfinite(coefs_Z[:, 1])
+
+    qZI_pred, qDI_pred = [], []
+    for xv in xs:
+        eta_D = np.interp(tau_fine, QRR_TAU_GRID[ok_D],
+                          coefs_D[ok_D, 0] + coefs_D[ok_D, 1] * xv)
+        eta_Z = np.interp(tau_fine, QRR_TAU_GRID[ok_Z],
+                          coefs_Z[ok_Z, 0] + coefs_Z[ok_Z, 1] * xv)
+
+        # sigmoid(eta) = 1 - Q(lower)/Q(upper) for each u = 2*tau
+        qd_inner = 1.0 / (1.0 + np.exp(-eta_D))
+        qz_inner = 1.0 / (1.0 + np.exp(-eta_Z))
+
+        qd = np.concatenate([[1.0], qd_inner, [0.0]])
+        qz = np.concatenate([[1.0], qz_inner, [1.0]])
+
+        qZI_pred.append(simpson(qz, x=qs2_01))
+        qDI_pred.append(simpson(qd, x=qs2_01))
+
+    return {"qZI": qZI_pred, "qDI": qDI_pred}
+
+
 def estimate_beta_qrfnc_R(data, qshalf, epsilon, qs, xs, starting_q):
     # print('testing_qrfnc')
     def df_to_r(df):
@@ -493,6 +568,7 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
     KB82_pred = estimate_indices_KB82(data, qs, xlist)
     b10_pred = estimate_indices_b10(data, qs, xlist)
     wl_pred = estimate_indices_wl(data, qs, xlist)
+    qrr_pred = estimate_indices_qrr(data, qs, xlist)
     qrr_linear_pred = estimate_indices_qrr_linear(data, qs, xlist)
     strat_pred = estimate_indices_strat(data, qs, xlist)
     iqrr_pred = estimate_indices_iqrr(data, qs, xlist)
@@ -512,6 +588,7 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
         wl_pred["qDI_wl1"]
     ]
     results = results + [qrfnc_pred_R_middle["qZI"], qrfnc_pred_R_middle["qDI"]]
+    results = results + [qrr_pred["qZI"], qrr_pred["qDI"]]
     results = results + [qrr_linear_pred["qZI"], qrr_linear_pred["qDI"]]
     results = results + [strat_pred["qZI"], strat_pred["qDI"]]
     results = results + [iqrr_pred["qZI"], iqrr_pred["qDI"], xlist]
@@ -522,7 +599,7 @@ def run(args):
     outputfilename = f"{args.output}_n={args.n}_a={args.alpha}b={args.beta}_c={args.c}_xmax={args.xmax}.csv"
     taus = args.taus_float_type
     ms=[]
-    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrfnc_R"] + ["qrr_linear"] + ["strat_K5"] + ["iqrr"]
+    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrfnc_R"] + ["qrr"] + ["qrr_linear"] + ["strat_K5"] + ["iqrr"]
     ncol = 2 * len(METHODS) + 1
     column_names = []
     for method in METHODS:
