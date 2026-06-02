@@ -71,7 +71,7 @@ def compute_indices(dgp_type, dgp_params, n, xmax):
     kb82     = base.estimate_indices_KB82(data, base.qs, base.xlist)
     b10      = base.estimate_indices_b10(data, base.qs, base.xlist)
     wl       = base.estimate_indices_wl(data, base.qs, base.xlist)
-    qrr      = base.estimate_indices_qrr(data, base.qs, base.xlist)
+    qrr_linear = base.estimate_indices_qrr_linear(data, base.qs, base.xlist)
     strat    = base.estimate_indices_strat(data, base.qs, base.xlist)
     iqrr     = base.estimate_indices_iqrr(data, base.qs, base.xlist)
 
@@ -80,7 +80,7 @@ def compute_indices(dgp_type, dgp_params, n, xmax):
     results += [kb82["qZI"],     kb82["qDI"]]
     results += [b10["qZI"],      b10["qDI"]]
     results += [wl["qZI_wl1"],   wl["qDI_wl1"]]
-    results += [qrr["qZI"],      qrr["qDI"]]
+    results += [qrr_linear["qZI"], qrr_linear["qDI"]]
     results += [strat["qZI"],    strat["qDI"]]
     results += [iqrr["qZI"],     iqrr["qDI"], base.xlist]
     return results
@@ -90,7 +90,7 @@ def compute_indices(dgp_type, dgp_params, n, xmax):
 # run / main
 # ---------------------------------------------------------------------------
 
-METHODS = ["iso_qr", "iso_tau_IQR", "KB82", "b10", "WL1", "qrr", "strat_K5", "iqrr"]
+METHODS = ["iso_qr", "iso_tau_IQR", "KB82", "b10", "WL1", "qrr_linear", "strat_K5", "iqrr"]
 
 
 def _dgp_params_from_args(args):

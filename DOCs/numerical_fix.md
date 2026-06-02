@@ -1,8 +1,8 @@
-# Numerical fix: QRR implementation
+# Numerical fix: QRR_linear implementation
 
 ## Problem
 
-The original QRR estimator used Nelder-Mead to minimise the nonlinear check function
+The original QRR_linear estimator used Nelder-Mead to minimise the nonlinear check function
 on the Y-scale:
 
     min_{a,b} Σᵢ ρ_τ(exp(yᵢ) − exp(a + b·xᵢ))
@@ -24,7 +24,7 @@ Three-part replacement in `estimate_indices_qrr` (both `mc_fld.py` and `mc_fld_n
 
 2. **Geometric-mean normalised weights.** Use `wᵢ = exp(yᵢ − ȳ)` instead of raw
    `exp(yᵢ)`. This preserves the "higher outcome → higher weight" motivation of Y-scale
-   QRR (first-order Taylor: ρ_τ(Y−exp(a+bx)) ≈ exp(y)·ρ_τ(y−(a+bx))), but prevents
+   QRR_linear (first-order Taylor: ρ_τ(Y−exp(a+bx)) ≈ exp(y)·ρ_τ(y−(a+bx))), but prevents
    weights from spanning many orders of magnitude in high-inequality scenarios.
 
 3. **Isotonic correction.** Apply `IsotonicRegression` to β₀ and β₁ across quantile
@@ -37,9 +37,9 @@ Three-part replacement in `estimate_indices_qrr` (both `mc_fld.py` and `mc_fld_n
 |--------|---------|----------|
 | BK     | equal   | no       |
 | IOQR   | equal   | yes      |
-| QRR    | exp(y−ȳ) | yes    |
+| QRR_linear    | exp(y−ȳ) | yes    |
 
-QRR is thus outcome-weighted isotonic QR — a genuine three-way distinction from BK and
+QRR_linear is thus outcome-weighted isotonic QR — a genuine three-way distinction from BK and
 IOQR.
 
 ## Validation
@@ -48,6 +48,6 @@ After the fix, 50 MC replications on the worst-case scenario (α=0.5, β=0.5, c=
 n=100, xmax=30) showed:
 
 - BK:  min/max qZI = 0.573 / 0.997, n_negative = 0
-- QRR: min/max qZI = 0.222 / 1.000, n_negative = 0
+- QRR_linear: min/max qZI = 0.222 / 1.000, n_negative = 0
 
 No overflow, no negative values.

@@ -19,10 +19,11 @@
 - **WL1** (Wu & Liu 2009) — stepwise noncrossing QR. Fits the median first, then adds
   quantile levels one at a time upward and downward using a noncrossing constraint from the
   previous level.
-- **QRR** (Farcomeni & Geraci 2024) — Quantile Ratio Regression. Outcome-weighted isotonic
-  QR on log(Y) with weights wᵢ = exp(yᵢ − ȳ). Motivated by the idea that larger-outcome
-  observations carry more information about the ratio Q(τ₁|x)/Q(τ₂|x), which is exactly
-  what qZ and qD measure. Added as a benchmark at the request of reviewers #4 and #5.
+- **QRR_linear** — Outcome-weighted isotonic QR on log(Y) with weights wᵢ = exp(yᵢ − ȳ).
+  Inspired by Farcomeni & Geraci (2024) QRR but not a faithful implementation (their method
+  uses a linearized iterative algorithm on quantile ratios directly; ours is a weighted LP on
+  the log-Y quantile function). Added as a QRR-flavored benchmark at the request of reviewers
+  #4 and #5.
 
 ### Simple baselines (added for reviewer #3)
 - **Strat** — Stratified empirical estimator. Bins x into K=5 equal-width groups, computes
@@ -77,11 +78,11 @@ correction the noisy extreme-quantile estimates of β₁ dominate the qZI integr
 This is the empirical manifestation of the bias–variance trade-off of isotonic
 regression that reviewer #9 asked about.
 
-### Against QRR
+### Against QRR_linear
 
-**IOQR and IAQR clearly dominate QRR in all three scenarios.**
+**IOQR and IAQR clearly dominate QRR_linear in all three scenarios.**
 
-| DGP | x | IOQR qZI MSE×10³ | QRR qZI MSE×10³ | ratio |
+| DGP | x | IOQR qZI MSE×10³ | QRR_linear qZI MSE×10³ | ratio |
 |-----|---|------------------|-----------------|-------|
 | 3a  | 1 | 9.63             | 40.12           | 4.2×  |
 | 3a  | 30| 2.19             | 25.12           | 11.5× |
@@ -90,11 +91,11 @@ regression that reviewer #9 asked about.
 | 3c  | 1 | 5.36             | 82.66           | 15.4× |
 | 3c  | 10| 1.48             | 37.07           | 25.0× |
 
-This is a stronger result than the well-specified case, where QRR ≈ BK ≈ IOQR.
-Under misspecification, QRR's outcome-level weighting concentrates influence on
+This is a stronger result than the well-specified case, where QRR_linear ≈ BK ≈ IOQR.
+Under misspecification, QRR_linear's outcome-level weighting concentrates influence on
 high-outcome observations, which are not representative of the full conditional
 distribution. This distorts the estimated β curves across the entire quantile grid.
-Reviewers #4 and #5 argued that QRR is a natural benchmark because it "directly
+Reviewers #4 and #5 argued that a QRR benchmark is natural because it "directly
 targets quantile ratios" — but empirically, IOQR and IAQR are more robust under
 all three misspecification types tested here.
 
@@ -102,12 +103,12 @@ all three misspecification types tested here.
 
 ## Summary
 
-| Scenario | Best overall | IOQR vs baselines | IOQR vs BK/BRW/WL1 | IOQR vs QRR |
+| Scenario | Best overall | IOQR vs baselines | IOQR vs BK/BRW/WL1 | IOQR vs QRR_linear |
 |---|---|---|---|---|
 | 3a quadratic | IOQR / IAQR | wins clearly | slight advantage | wins 4–12× |
 | 3b log-normal | all QR-based tie | wins clearly | no meaningful diff | wins 1.4–1.7× |
 | 3c non-mono β₁ | mixed by x | wins clearly | loses at mod. x, wins at large x | wins 5–25× |
 
-The simple baselines are never competitive. QRR is never competitive under
+The simple baselines are never competitive. QRR_linear is never competitive under
 misspecification. The main open question is the bias–variance trade-off with BK/WL1
 in scenario 3c, which is an honest limitation that should be discussed in the paper.

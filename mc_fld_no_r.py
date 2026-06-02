@@ -301,7 +301,7 @@ def estimate_indices_KB82(data, qs, xs):
     qDI_pred = [simpson(qD_pred, x=qs2_01) for qD_pred in qD_preds]
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
-def estimate_indices_qrr(data, qs, xs):
+def estimate_indices_qrr_linear(data, qs, xs):
     """Weighted QR on log(Y) with w_i = exp(y_i - mean(y)), plus isotonic correction.
     Weights downweight/upweight observations by their outcome level relative to the
     sample mean; geometric-mean normalisation prevents extreme leverage.
@@ -427,7 +427,7 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
     KB82_pred = estimate_indices_KB82(data, qs, xlist)
     b10_pred = estimate_indices_b10(data, qs, xlist)
     wl_pred = estimate_indices_wl(data, qs, xlist)
-    qrr_pred = estimate_indices_qrr(data, qs, xlist)
+    qrr_linear_pred = estimate_indices_qrr_linear(data, qs, xlist)
     strat_pred = estimate_indices_strat(data, qs, xlist)
     iqrr_pred = estimate_indices_iqrr(data, qs, xlist)
     results = [
@@ -445,7 +445,7 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
         wl_pred["qZI_wl1"],
         wl_pred["qDI_wl1"]
     ]
-    results = results + [qrr_pred["qZI"], qrr_pred["qDI"]]
+    results = results + [qrr_linear_pred["qZI"], qrr_linear_pred["qDI"]]
     results = results + [strat_pred["qZI"], strat_pred["qDI"]]
     results = results + [iqrr_pred["qZI"], iqrr_pred["qDI"], xlist]
     return results
@@ -455,7 +455,7 @@ def run(args):
     outputfilename = f"{args.output}_n={args.n}_a={args.alpha}b={args.beta}_c={args.c}_xmax={args.xmax}.csv"
     taus = args.taus_float_type
     ms=[]
-    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrr"] + ["strat_K5"] + ["iqrr"]
+    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrr_linear"] + ["strat_K5"] + ["iqrr"]
     ncol = 2 * len(METHODS) + 1
     column_names = []
     for method in METHODS:
