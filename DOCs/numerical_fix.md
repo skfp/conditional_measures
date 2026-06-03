@@ -17,7 +17,7 @@ where exp(y) values span many orders of magnitude and the loss landscape is ill-
 
 ## Fix
 
-Three-part replacement in `estimate_indices_qrr` (both `mc_fld.py` and `mc_fld_no_r.py`):
+Three-part replacement in `estimate_indices_qrr_linear` (`mc_fld.py`):
 
 1. **Convex solver.** Replace Nelder-Mead with sklearn `QuantileRegressor` (linear
    programming). The LP always converges to the global optimum and returns bounded betas.

@@ -91,7 +91,7 @@ regression that reviewer #9 asked about.
 | 3c  | 1 | 5.36             | 82.66           | 15.4× |
 | 3c  | 10| 1.48             | 37.07           | 25.0× |
 
-This is a stronger result than the well-specified case, where QRR_linear ≈ BK ≈ IOQR.
+This result holds in the well-specified case too: QRR_linear has ~4× higher MSE than BK and IOQR even under the correctly specified EFLD model (mean qDI MSE ×10³: QRR_linear 10.6 vs IOQR 2.5, n=50).
 Under misspecification, QRR_linear's outcome-level weighting concentrates influence on
 high-outcome observations, which are not representative of the full conditional
 distribution. This distorts the estimated β curves across the entire quantile grid.
