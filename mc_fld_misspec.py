@@ -50,7 +50,7 @@ def gen_sample_3c(c_bell, n, xmax):
 # compute_indices  (same estimation pipeline for all three DGPs)
 # ---------------------------------------------------------------------------
 
-def compute_indices(dgp_type, dgp_params, n, xmax):
+def compute_indices(dgp_type, dgp_params, n, xmax, qrr_tau_grid=None):
     if dgp_type == '3a':
         data = gen_sample_3a(**dgp_params, n=n, xmax=xmax)
     elif dgp_type == '3b':
@@ -71,7 +71,7 @@ def compute_indices(dgp_type, dgp_params, n, xmax):
     kb82     = base.estimate_indices_KB82(data, base.qs, base.xlist)
     b10      = base.estimate_indices_b10(data, base.qs, base.xlist)
     wl       = base.estimate_indices_wl(data, base.qs, base.xlist)
-    qrr      = base.estimate_indices_qrr(data, base.qs, base.xlist)
+    qrr      = base.estimate_indices_qrr(data, base.qs, base.xlist, tau_grid=qrr_tau_grid)
     qrr_linear = base.estimate_indices_qrr_linear(data, base.qs, base.xlist)
     strat    = base.estimate_indices_strat(data, base.qs, base.xlist)
     iqrr     = base.estimate_indices_iqrr(data, base.qs, base.xlist)
@@ -123,9 +123,11 @@ def run(args):
     column_names = [f"{m}_{idx}" for m in METHODS for idx in ["qZI", "qDI"]]
     column_names.append("xs")
 
+    qrr_tau_grid = base.make_qrr_tau_grid(args.qrr_n_taus) if args.qrr_n_taus != 11 else None
     outputs = []
     for _ in range(args.mc):
-        outputs.append(compute_indices(args.dgp, dgp_params, args.n, args.xmax))
+        outputs.append(compute_indices(args.dgp, dgp_params, args.n, args.xmax,
+                                       qrr_tau_grid=qrr_tau_grid))
 
     outputfilenamepickle = outputfilename.replace('.csv', '.pickle')
     with open(outputfilenamepickle, 'wb') as fh:
@@ -157,6 +159,8 @@ def main():
     parser.add_argument("--sigma1", type=float, default=0.02)
     # 3c params
     parser.add_argument("--c_bell", type=float, default=0.05)
+    parser.add_argument("--qrr-n-taus", type=int, default=11,
+                        help="Number of tau grid points for QRR integration (default: 11)")
     args = parser.parse_args()
     run(args)
 

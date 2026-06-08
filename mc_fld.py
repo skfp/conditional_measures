@@ -63,8 +63,13 @@ fit_qrr_multi <- function(x_vec, y_vec, tau_lowers, tau_uppers) {
 }
 """)
 
-# Tau grid for QRR: 11 levels covering (0, 0.5); each defines one ratio pair per curve
-QRR_TAU_GRID = np.array([0.01, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.49])
+# Default tau grid for QRR (11 points). Override via --qrr-n-taus.
+QRR_TAU_GRID = np.linspace(0.01, 0.49, 11)
+
+
+def make_qrr_tau_grid(n_taus):
+    """Evenly spaced tau grid with n_taus points in [0.01, 0.49]."""
+    return np.linspace(0.01, 0.49, n_taus)
 
 def gen_sample(alpha, beta, c, n, xmax):
     x = np.random.uniform(0, xmax, n)
@@ -378,15 +383,19 @@ def estimate_indices_qrr_linear(data, qs, xs):
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
 
-def estimate_indices_qrr(data, qs, xs):
+def estimate_indices_qrr(data, qs, xs, tau_grid=None):
     """Farcomeni-Geraci (2024) Quantile Ratio Regression via Qtools::qrr().
 
-    Fits QRR at QRR_TAU_GRID tau pairs for both the qD pairing (tau, 1-tau)
-    and the qZ pairing (tau, tau+0.5).  Link: g(R) = log(R-1), so
-    R = 1 + exp(eta) and qD/qZ = sigmoid(eta) where eta = alpha + beta*x.
+    Fits QRR at tau_grid pairs for both the qD pairing (tau, 1-tau) and the
+    qZ pairing (tau, tau+0.5).  Link: g(R) = log(R-1), so R = 1 + exp(eta)
+    and qD/qZ = sigmoid(eta) where eta = alpha + beta*x.
     Data must be on log-Y scale (as stored in the simulation); we exp() it
     before passing to R so that qrr works on the original Y scale.
+    tau_grid defaults to QRR_TAU_GRID; pass make_qrr_tau_grid(n) to override.
     """
+    if tau_grid is None:
+        tau_grid = QRR_TAU_GRID
+
     def np_to_r(arr):
         with (robjects.default_converter + numpy2ri.converter).context():
             return robjects.conversion.get_conversion().py2rpy(arr)
@@ -397,12 +406,12 @@ def estimate_indices_qrr(data, qs, xs):
     r_fit = robjects.r['fit_qrr_multi']
     coefs_D = np.array(r_fit(
         np_to_r(x_vec), np_to_r(Y_vec),
-        np_to_r(QRR_TAU_GRID), np_to_r(1.0 - QRR_TAU_GRID)
-    ))  # shape (11, 2): alpha and beta for each (tau, 1-tau) pair
+        np_to_r(tau_grid), np_to_r(1.0 - tau_grid)
+    ))
     coefs_Z = np.array(r_fit(
         np_to_r(x_vec), np_to_r(Y_vec),
-        np_to_r(QRR_TAU_GRID), np_to_r(QRR_TAU_GRID + 0.5)
-    ))  # shape (11, 2): alpha and beta for each (tau, tau+0.5) pair
+        np_to_r(tau_grid), np_to_r(tau_grid + 0.5)
+    ))
 
     tau_fine = qs2 / 2  # 97 values in [0.01, 0.49], matching qs2 inner grid
     ok_D = np.isfinite(coefs_D[:, 0]) & np.isfinite(coefs_D[:, 1])
@@ -410,9 +419,9 @@ def estimate_indices_qrr(data, qs, xs):
 
     qZI_pred, qDI_pred = [], []
     for xv in xs:
-        eta_D = np.interp(tau_fine, QRR_TAU_GRID[ok_D],
+        eta_D = np.interp(tau_fine, tau_grid[ok_D],
                           coefs_D[ok_D, 0] + coefs_D[ok_D, 1] * xv)
-        eta_Z = np.interp(tau_fine, QRR_TAU_GRID[ok_Z],
+        eta_Z = np.interp(tau_fine, tau_grid[ok_Z],
                           coefs_Z[ok_Z, 0] + coefs_Z[ok_Z, 1] * xv)
 
         # sigmoid(eta) = 1 - Q(lower)/Q(upper) for each u = 2*tau
@@ -554,7 +563,14 @@ def estimate_indices_iqrr(data, qs, xs):
     return {"qZI": qZI_pred, "qDI": qDI_pred}
 
 
-def compute_indices(alpha, beta, c, n, xmax, taus, ms):
+def compute_qrr_only(alpha, beta, c, n, xmax, tau_grid):
+    """Run only the QRR estimator — used for grid-size convergence study."""
+    data = gen_sample(alpha, beta, c, n, xmax)
+    qrr_pred = estimate_indices_qrr(data, qs, xlist, tau_grid=tau_grid)
+    return [qrr_pred["qZI"], qrr_pred["qDI"], xlist]
+
+
+def compute_indices(alpha, beta, c, n, xmax, taus, ms, qrr_tau_grid=None):
     # generate sample from FLD distribution
     data = gen_sample(alpha, beta, c, n, xmax)
     beta25 = [i[0] for i in estimate_betas_iso_oqr(data, [0.25])]
@@ -568,7 +584,7 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
     KB82_pred = estimate_indices_KB82(data, qs, xlist)
     b10_pred = estimate_indices_b10(data, qs, xlist)
     wl_pred = estimate_indices_wl(data, qs, xlist)
-    qrr_pred = estimate_indices_qrr(data, qs, xlist)
+    qrr_pred = estimate_indices_qrr(data, qs, xlist, tau_grid=qrr_tau_grid)
     qrr_linear_pred = estimate_indices_qrr_linear(data, qs, xlist)
     strat_pred = estimate_indices_strat(data, qs, xlist)
     iqrr_pred = estimate_indices_iqrr(data, qs, xlist)
@@ -596,19 +612,35 @@ def compute_indices(alpha, beta, c, n, xmax, taus, ms):
 
 
 def run(args):
-    outputfilename = f"{args.output}_n={args.n}_a={args.alpha}b={args.beta}_c={args.c}_xmax={args.xmax}.csv"
     taus = args.taus_float_type
-    ms=[]
-    METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrfnc_R"] + ["qrr"] + ["qrr_linear"] + ["strat_K5"] + ["iqrr"]
-    ncol = 2 * len(METHODS) + 1
-    column_names = []
-    for method in METHODS:
-        column_names += [f"{method}_{index}" for index in ["qZI", "qDI"]]
-    column_names.append("xs")
-    outputs = []
-    for _ in range(args.mc):
-        indices = compute_indices(args.alpha, args.beta, args.c, args.n, args.xmax, taus, ms)
-        outputs.append(indices)
+    ms = []
+
+    if args.qrr_only:
+        tau_grid = make_qrr_tau_grid(args.qrr_n_taus)
+        outputfilename = (f"{args.output}_n={args.n}_a={args.alpha}b={args.beta}"
+                          f"_c={args.c}_xmax={args.xmax}_qrr_ntaus={args.qrr_n_taus}.csv")
+        METHODS = ["qrr"]
+        ncol = 2 * len(METHODS) + 1
+        column_names = [f"qrr_{idx}" for idx in ["qZI", "qDI"]] + ["xs"]
+        outputs = []
+        for _ in range(args.mc):
+            outputs.append(compute_qrr_only(
+                args.alpha, args.beta, args.c, args.n, args.xmax, tau_grid))
+    else:
+        outputfilename = (f"{args.output}_n={args.n}_a={args.alpha}b={args.beta}"
+                          f"_c={args.c}_xmax={args.xmax}.csv")
+        METHODS = ["iso_qr"] + ["iso_tau_IQR"] + ["KB82"] + ["b10"] + ["WL1"] + ["qrfnc_R"] + ["qrr"] + ["qrr_linear"] + ["strat_K5"] + ["iqrr"]
+        ncol = 2 * len(METHODS) + 1
+        column_names = []
+        for method in METHODS:
+            column_names += [f"{method}_{index}" for index in ["qZI", "qDI"]]
+        column_names.append("xs")
+        qrr_tau_grid = make_qrr_tau_grid(args.qrr_n_taus) if args.qrr_n_taus != 11 else None
+        outputs = []
+        for _ in range(args.mc):
+            outputs.append(compute_indices(
+                args.alpha, args.beta, args.c, args.n, args.xmax, taus, ms,
+                qrr_tau_grid=qrr_tau_grid))
 
     # save results to pickle as well
     outputfilenamepickle = outputfilename.replace('.csv', '.pickle')
@@ -635,6 +667,10 @@ def main():
     parser.add_argument("--xmax", type=float, default=30, help="Parameter xmax of FLD")
     parser.add_argument('--taus-float-type', nargs='+', type=float, help="List of smoothness parameters tau")
     parser.add_argument("--output", type=str, required=True, help="Name of output file")
+    parser.add_argument("--qrr-n-taus", type=int, default=11,
+                        help="Number of tau grid points for QRR integration (default: 11)")
+    parser.add_argument("--qrr-only", action="store_true",
+                        help="Run only the QRR estimator (for grid-size convergence study)")
     args = parser.parse_args()
     run(args)
 
